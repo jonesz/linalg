@@ -10,7 +10,7 @@ entry test_sa (sa_max:i64) (sa_tol:f64) : ([2]f64, bool, i64, f64) =
   let v0 = [0.5, 0.5]
   let ap = dps.default with sa_max = sa_max
                        with sa_tol = sa_tol
-  let (res, b, i, tol, _) = dps.sa bellman v0 ap 0
+  let {res, conv=b, iter=i, tol, rtol=_} = dps.sa bellman v0 ap 0
   in (res, b, i, tol)
 
 -- ==
@@ -29,7 +29,7 @@ def bellman_j (a:[2]f64) : ([2]f64, [2][2]f64) =
 entry test_poly (sa_max:i64) : ([2]f64, bool, i64, i64, i64, f64) =
   let v0 = [0.5, 0.5]
   let ap = dps.default with sa_max = sa_max
-  let (res, _, b, i, j, k, tol) = dps.poly bellman_j v0 ap 0
+  let {res, jac=_, conv=b, iter_sa=i, iter_nk=j, rtrips=k, tol} = dps.poly bellman_j v0 ap 0
   in (res, b, i, j, k, tol)
 
 -- ==
@@ -44,7 +44,7 @@ def wrapj [n][m] (f: [n]f64->[m]f64) (x:[n]f64) : ([m]f64,[m][n]f64) =
 entry test_poly_jvp (sa_max:i64) : ([2]f64,bool,i64,i64,i64,f64) =
   let v0 = [0.5, 0.5]
   let ap = dps.default with sa_max = sa_max
-  let (res, _, b, i, j, k, tol) =
+  let {res, jac=_, conv=b, iter_sa=i, iter_nk=j, rtrips=k, tol} =
     dps.poly (wrapj bellman) v0 ap 0
   in (res, b, i, j, k, tol)
 
@@ -55,7 +55,8 @@ entry test_poly_jvp (sa_max:i64) : ([2]f64,bool,i64,i64,i64,f64) =
 entry test_polyad (sa_max:i64) : ([2]f64,bool,i64,i64,i64,f64) =
   let v0 = [0.5, 0.5]
   let ap = dps.default with sa_max = sa_max
-  in dps.polyad bellman v0 ap 0
+  let {res,conv,iter_sa,iter_nk,rtrips,tol} = dps.polyad bellman v0 ap 0
+  in (res,conv,iter_sa,iter_nk,rtrips,tol)
 
 -- ==
 -- entry: test_polyad
@@ -78,7 +79,7 @@ entry test_polyr (n:i64) (sa_max:i64) : (bool, i64, [n]f64, [n]f64) =
   let ap = dps.default with sa_max = sa_max
   let rs = linspace n 1 20
   let ress = map (\r -> let v0 = [0.5,0.5]
-                        let (res, _, b, i, j, _k, _tol) =
+                        let {res, jac=_, conv=b, iter_sa=i, iter_nk=j, rtrips=_, tol=_} =
                           dps.poly (bellmanr r) v0 ap 0
                         in (r,res[0],b,i+j)) rs
   let converged = reduce (&&) true (map (.2) ress)
@@ -92,9 +93,11 @@ entry test_polyr (n:i64) (sa_max:i64) : (bool, i64, [n]f64, [n]f64) =
 
 entry test_poly1d (sa_max : i64) : ([1]f64, [1][1]f64, bool, i64, i64, i64, f64) =
   let ap = dps.default with sa_max = sa_max
-  in dps.poly (\x -> ([f64.cos x[0]],
-                      [[- f64.sin x[0]]]))
-              [0.7] ap 0
+  let {res, jac, conv, iter_sa, iter_nk, rtrips, tol} =
+    dps.poly (\x -> ([f64.cos x[0]],
+                     [[- f64.sin x[0]]]))
+             [0.7] ap 0
+  in (res,jac,conv,iter_sa,iter_nk,rtrips,tol)
 
 -- ==
 -- entry: test_poly1d
@@ -104,7 +107,7 @@ entry test_sqrt (sa_max : i64) : [1]f64 =
   let ap = dps.default with sa_max = sa_max
   in dps.poly (\x -> ( [ 0.5 * (x[0]+2/x[0]) ],
                        [[ 2*x[0] ]] )
-              ) [1.4] ap 0 |> (.0)
+              ) [1.4] ap 0 |> (.res)
 
 -- ==
 -- entry: test_sqrt
@@ -167,7 +170,7 @@ entry test_jacobi_polyad (sa_max: i64) : [3]f64 =
   let f = jacobi (copy A) (copy b)
   let x0 = replicate 3 1f64
   let ap = dps.default with sa_max = sa_max
-  in dps.polyad f x0 ap 0 |> (.0)
+  in dps.polyad f x0 ap 0 |> (.res)
 
 -- ==
 -- entry: test_jacobi_polyad

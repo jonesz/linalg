@@ -53,55 +53,55 @@ module type dpsolve = {
   -- the minimal, and the maximal number of iterations can be adjusted by
   -- altering the parameter `p`. The argument `b` is the beta discount factor,
   -- which allows for stopping early (when the relative tolerance is close to
-  -- `b`). The function returns a quintuple containing an approximate fix-point,
-  -- a boolean specifying whether the algorithm converged (according to the
-  -- values in `p`), the number of iterations used, and finally, the tolerance
-  -- and the relative tolerance of the last two fix-point approximations and the
-  -- last two tolerances, respectively (maximum of each dimension).
+  -- `b`). The function returns a record containing an approximate fix-point, a
+  -- boolean specifying whether the algorithm converged (according to the values
+  -- in `p`), the number of iterations used, and finally, the tolerance and the
+  -- relative tolerance of the last two fix-point approximations and the last
+  -- two tolerances, respectively (maximum of each dimension).
   val sa [m] : (f:[m]t->[m]t) -> (v:[m]t) -> (p:param) -> (b:t)
-               -> ([m]t, bool, i64, t, t)
+               -> {res:[m]t, conv:bool, iter:i64, tol:t, rtol:t}
 
   -- | Find a fix-point for the function `f` using Newton-Kantorovich iterations
   -- with the initial guess `v`, and parameter `p`. The tolerance, the minimal,
   -- and the maximal number of iterations can be adjusted by altering the
   -- parameter `p`. The function `f` should return a pair of a new next
   -- approximation and the Jacobian matrix for the function `f` relative to the
-  -- argument given. The function returns a quintuple containing an approximate
-  -- fix-point, a Jacobian matrix for the fix-point, a boolean specifying whether
-  -- the algorithm converged (according to the values in `p`), the number of
-  -- iterations used, and finally, the tolerance of the last two fix-point
-  -- approximations (maximum of each dimension).
+  -- argument given. The function returns a record containing an approximate
+  -- fix-point, a Jacobian matrix for the fix-point, a boolean specifying
+  -- whether the algorithm converged (according to the values in `p`), the
+  -- number of iterations used, and finally, the tolerance of the last two
+  -- fix-point approximations (maximum of each dimension).
   val nk [m] : (f: [m]t -> ([m]t,mat[m])) -> (v:[m]t) -> (p:param)
-               ->  ([m]t, mat[m], bool, i64, t)
+               ->  {res:[m]t, jac:mat[m], conv:bool, iter:i64, tol:t}
 
   -- | Find a fix-point for the function `f` using a combination of successive
   -- approximation iterations and Newton-Kantorovich iterations. The initial
   -- guess is `v` and the parameter `p` is passed to the calls to `sa` and
   -- `nk`. The function `f` should return a pair of a new next approximation and
   -- the Jacobian matrix for the function `f` relative to the argument
-  -- given. The function returns a 7-tuple containing an approximate fix-point, a
+  -- given. The function returns a record containing an approximate fix-point, a
   -- Jacobian matrix for the fix-point, a boolean specifying whether the
   -- algorithm converged (according to the values in `p`), the number of
-  -- iterations used for the total sa iterations, the total nk iterations, and
-  -- the number of round-trips. The 7'th element of the result tuple is the
-  -- tolerance of the last two fix-point approximations (maximum of each
-  -- dimension).
+  -- iterations used for the total sa iterations, the total nk iterations, the
+  -- number of round-trips, and the tolerance of the last two fix-point
+  -- approximations (maximum of each dimension).
   val poly [m] : (f: [m]t -> ([m]t,mat[m])) -> (v:[m]t) -> (p:param)
-                 -> (b:t) -> ([m]t,mat[m], bool, i64, i64, i64, t)
+                 -> (b:t) -> {res:[m]t, jac:mat[m], conv:bool, iter_sa:i64,
+			      iter_nk:i64, rtrips: i64, tol:t}
 
   -- | Find a fix-point for the function `f` using a combination of successive
   -- approximation iterations and Newton-Kantorovich iterations. The initial
   -- guess is `v` and the parameter `p` is passed to the calls to `sa` and
   -- `nk`. The function uses forward-mode automatic differentiation to compute
   -- the Jacobian matrix relative to the argument given to `f`. The function
-  -- returns a 6-tuple containing an approximate fix-point, a boolean specifying
+  -- returns a record containing an approximate fix-point, a boolean specifying
   -- whether the algorithm converged (according to the values in `p`), the
   -- number of iterations used for the total sa iterations, the total nk
-  -- iterations, and the number of round-trips. The 6'th element of the result
-  -- tuple is the tolerance of the last two fix-point approximations (maximum of
-  -- each dimension).
+  -- iterations, the number of round-trips, and the tolerance of the last two
+  -- fix-point approximations (maximum of each dimension).
   val polyad [m] : (f:[m]t->[m]t) -> (v:[m]t) -> (p:param) -> (b:t)
-                   -> ([m]t, bool, i64, i64, i64, t)
+                   -> {res:[m]t, conv:bool, iter_sa:i64, iter_nk: i64,
+		       rtrips:i64, tol:t}
 }
 
 -- | Module type specifying a linear equations solver and functionality for
@@ -128,7 +128,7 @@ module type ols_jac = {
   -- | Solve systems of linear equations `Ax = b` with respect to `x`.
   val ols [n] : mat [n] -> [n]t -> [n]t
 
-  -- | Augment function result with its partial derivative (Jacobinan) relative
+  -- | Augment function result with its partial derivative (Jacobian) relative
   -- to the function argument. We have `wrap f x = (f x, Df x)`, where `Df x` is
   -- the Jacobian matrix for `f` at `x`.
   val wrapj [n] : ([n]t->[n]t) -> [n]t -> ([n]t,mat [n])
@@ -174,8 +174,9 @@ module mk_dpsolve (T:real)
   def sa [m] (bellman : [m]t -> [m]t)
              (V0:[m]t)
              (ap:param)
-             (bet:t) : ([m]t, bool, i64, t, t) =
-      loop (V0,converged,i,tol,_rtol) = (V0, false, 0, T.i64 0, T.i64 0)
+             (bet:t) : {res:[m]t, conv:bool, iter:i64, tol:t, rtol:t} =
+    loop {res=V0,conv=converged,iter=i,tol=tol,rtol=_rtol} =
+      {res=V0, conv=false, iter=0, tol=T.i64 0, rtol=T.i64 0}
       while !converged && i < ap.sa_max do
         let V = bellman V0
         let tol' = T.maximum (map2 (\a b -> T.(abs(a-b))) V V0)
@@ -189,12 +190,13 @@ module mk_dpsolve (T:real)
              --let ltol = ap.sa_tol * f64.(10 ** adj)
              let ltol = ap.sa_tol
              in (i > ap.sa_min && T.(tol' < ltol))
-        in (V, converged, i+1, tol',rtol')
+        in {res=V, conv=converged, iter=i+1, tol=tol',rtol=rtol'}
 
   def nk [m] (bellman : [m]t -> ([m]t,mat [m]))
              (V0:[m]t)
-             (ap:param) : ([m]t, mat [m], bool, i64, t) =
-    loop (V0,_dV0,converged,i,_tol) = (V0, ols_jac.zero m, false, 0, T.i64 1)
+             (ap:param) : {res:[m]t, jac:mat[m], conv:bool, iter:i64, tol:t} =
+    loop {res=V0,jac=_dV0,conv=converged,iter=i,tol=_tol} =
+      {res=V0, jac=ols_jac.zero m, conv=false, iter=0, tol=T.i64 1}
       while !converged && i < ap.pi_max do
         let (V1, dV) = bellman V0
         --let V = map2 (-) V0 (la.matvecmul_row (la.inv dV) V1)
@@ -212,7 +214,7 @@ module mk_dpsolve (T:real)
         -- ltol=ap.pi_tol  -- tolerance
 
         let converged = T.(tol' < ltol) -- Convergence achieved
-        in (V0, dV, converged, i+1, tol')
+        in {res=V0, jac=dV, conv=converged, iter=i+1, tol=tol'}
 
   -- dpsolve.poly(f,v0,ap,bet): Solve for fixed point using a combination of
   -- Successive Approximations (SA) and Newton-Kantorovich (NK) iterations.  The
@@ -226,17 +228,19 @@ module mk_dpsolve (T:real)
   def poly [m] (bellman : [m]t -> ([m]t,mat[m]))
                (V0:[m]t)
                (ap:param)
-               (bet:t) : ([m]t, mat [m], bool, i64, i64, i64, t) =
-    loop (V0,_dV,converged,i,j,k,_tol) = (V0, ols_jac.zero m, false, 0, 0, 0, T.i64 1)
+               (bet:t) : {res:[m]t, jac:mat [m], conv:bool, iter_sa:i64,
+			  iter_nk:i64, rtrips:i64, tol:t} =
+    loop {res=V0,jac=_dV,conv=converged,iter_sa=i,iter_nk=j,rtrips=k,tol=_tol} =
+      {res=V0, jac=ols_jac.zero m, conv=false, iter_sa=0, iter_nk=0, rtrips=0, tol=T.i64 1}
       while !converged && k < ap.max_fxpiter do
         -- poly-algorithm loop (switching between sa and nk)
-        let (V1,_,i',_,_) = sa ((.0) <-< bellman) V0 ap bet
-        let (V2, dV, c2, j', tol) = nk bellman V1 ap
-        in (V2,dV,c2,i+i',j+j',k+1,tol)
+        let {res=V1,conv=_,iter=i',tol=_,rtol=_} = sa ((.0) <-< bellman) V0 ap bet
+        let {res=V2, jac=dV, conv=c2, iter=j', tol} = nk bellman V1 ap
+        in {res=V2,jac=dV,conv=c2,iter_sa=i+i',iter_nk=j+j',rtrips=k+1,tol=tol}
 
   def polyad f x ap bet =
-    let (y,_,b,i,j,k,tol) = poly (ols_jac.wrapj f) x ap bet
-    in (y,b,i,j,k,tol)
+    let {res,jac=_,conv,iter_sa,iter_nk,rtrips,tol} = poly (ols_jac.wrapj f) x ap bet
+    in {res,conv,iter_sa,iter_nk,rtrips,tol}
 }
 
 import "lu"
