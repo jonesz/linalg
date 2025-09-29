@@ -142,8 +142,8 @@ module type ols_jac = {
 -- equations solver on `f64` (e.g., `lu f64`) and Futhark's AD support.
 
 module mk_dpsolve (T:real)
-  	          (ols_jac: ols_jac with t = T.t) : dpsolve with t = T.t
-				 			    with mat [n] = ols_jac.mat [n] =
+                  (ols_jac: ols_jac with t = T.t) : dpsolve with t = T.t
+                                                            with mat [n] = ols_jac.mat [n] =
 {
   type t = T.t
   type mat [n] = ols_jac.mat [n]
@@ -186,18 +186,18 @@ module mk_dpsolve (T:real)
       loop (V0,converged,i,tol,_rtol) = (V0, false, 0, T.i64 0, T.i64 0)
       while !converged && i < ap.sa_max do
         let V = bellman V0
-	let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0)
-	let rtol' = if i == 1 then T.i64 1
-	 	    else T.(tol' / tol)
-	let converged =
+        let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0)
+        let rtol' = if i == 1 then T.i64 1
+                    else T.(tol' / tol)
+        let converged =
              -- Rule 1
              (i > ap.sa_min && (T.(abs(bet-rtol') < ap.tol_ratio)))
           || -- Rule 2
              --let adj = f64.(maximum V0 |> abs |> log10 |> ceil)
              --let ltol = ap.sa_tol * f64.(10 ** adj)
-	     let ltol = ap.sa_tol
+             let ltol = ap.sa_tol
              in (i > ap.sa_min && T.(tol' < ltol))
-	in (V, converged, i+1, tol',rtol')
+        in (V, converged, i+1, tol',rtol')
 
   def nk [m] (bellman : [m]t -> ([m]t,mat [m]))
              (V0:[m]t)
@@ -206,17 +206,17 @@ module mk_dpsolve (T:real)
       while !converged && i < ap.pi_max do
         let (V1, dV) = bellman V0
         --let V = map2 (-) V0 (la.matvecmul_row (la.inv dV) V1)
-	let F = ols_jac.sub (ols_jac.eye m) dV
-  	--let _hermitian =
-	--  map2 (map2 (T.==)) F (transpose F) |> map (reduce (&&) true) |> reduce (&&) true
-	let V = map2 (T.-) V0 (ols_jac.ols F (map2 (T.-) V0 V1))  -- NK-iteration
-	-- do additional SA iteration for stability and accurate measure of error bound
-	let (V0, _) = bellman V
-	let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0) -- tolerance
+        let F = ols_jac.sub (ols_jac.eye m) dV
+        --let _hermitian =
+        --  map2 (map2 (T.==)) F (transpose F) |> map (reduce (&&) true) |> reduce (&&) true
+        let V = map2 (T.-) V0 (ols_jac.ols F (map2 (T.-) V0 V1))  -- NK-iteration
+        -- do additional SA iteration for stability and accurate measure of error bound
+        let (V0, _) = bellman V
+        let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0) -- tolerance
 
-	-- adjusting the N-K tolerance to the magnitude of ev
-	let adj = T.(maximumT V0 |> abs |> log10 |> ceil)
-	let ltol = T.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
+        -- adjusting the N-K tolerance to the magnitude of ev
+        let adj = T.(maximumT V0 |> abs |> log10 |> ceil)
+        let ltol = T.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
         -- ltol=ap.pi_tol  -- tolerance
 
         let converged = T.(tol' < ltol) -- Convergence achieved
@@ -239,7 +239,7 @@ module mk_dpsolve (T:real)
       while !converged && k < ap.max_fxpiter do
         -- poly-algorithm loop (switching between sa and nk)
         let (V1,_,i',_,_) = sa ((.0) <-< bellman) V0 ap bet
-	let (V2, dV, c2, j', tol) = nk bellman V1 ap
+        let (V2, dV, c2, j', tol) = nk bellman V1 ap
         in (V2,dV,c2,i+i',j+j',k+1,tol)
 
   def polyad f x ap bet =
@@ -262,7 +262,7 @@ module mk_dpsolve_dense (T:real) : dpsolve with t = T.t with mat[n] = [n][n]T.t 
       def zero n = replicate n (replicate n (T.i64 0))
       def sub a b = map2 (map2 (T.-)) a b
       def wrapj [m] (f: [m]t->[m]t) (x:[m]t) : ([m]t,[m][m]t) =
-	(f x, #[sequential_outer] tabulate m (jvp f x <-< idd m) |> transpose)
+        (f x, #[sequential_outer] tabulate m (jvp f x <-< idd m) |> transpose)
     }
     open mk_dpsolve T ols_jac
 }
