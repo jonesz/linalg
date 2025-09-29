@@ -1,7 +1,7 @@
 -- | ignore
 
 import "dpsolve"
-module dps = mk_dpsolve f64
+module dps = mk_dpsolve_dense f64
 
 def bellman (x:[2]f64) : [2]f64 =
   [f64.sqrt x[1], f64.sqrt(1 - x[0] ** 2)]

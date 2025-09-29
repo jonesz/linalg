@@ -12,6 +12,7 @@
 -- https://editorialexpress.com/jrust/sdp/ndp.pdf and a demonstration of its use
 -- in https://elsman.com/pdf/dpsolve-2025-09-27.pdf.
 
+import "linalg"
 import "lu"
 
 local
@@ -22,6 +23,10 @@ local
 module type dpsolve = {
   -- | The scalar type.
   type t
+
+  -- | Type of square matrices of size n (e.g., square or dense), with t as
+  -- scalar type.
+  type mat [n]
 
   -- | The type of solver parameters.
   type param = {
@@ -67,8 +72,8 @@ module type dpsolve = {
   -- the algorithm converged (according to the values in `p`), the number of
   -- iterations used, and finally, the tolerance of the last two fix-point
   -- approximations (maximum of each dimension).
-  val nk [m] : (f: [m]t -> ([m]t,[m][m]t)) -> (v:[m]t) -> (p:param)
-               ->  ([m]t, [m][m]t, bool, i64, t)
+  val nk [m] : (f: [m]t -> ([m]t,mat[m])) -> (v:[m]t) -> (p:param)
+               ->  ([m]t, mat[m], bool, i64, t)
 
   -- | Find a fix-point for the function `f` using a combination of successive
   -- approximation iterations and Newton-Kantorovich iterations. The initial
@@ -82,8 +87,8 @@ module type dpsolve = {
   -- the number of round-trips. The 7'th element of the result tuple is the
   -- tolerance of the last two fix-point approximations (maximum of each
   -- dimension).
-  val poly [m] : (f: [m]t -> ([m]t,[m][m]t)) -> (v:[m]t) -> (p:param)
-                 -> (b:t) -> ([m]t,[m][m]t,bool,i64,i64,i64,t)
+  val poly [m] : (f: [m]t -> ([m]t,mat[m])) -> (v:[m]t) -> (p:param)
+                 -> (b:t) -> ([m]t,mat[m], bool, i64, i64, i64, t)
 
   -- | Find a fix-point for the function `f` using a combination of successive
   -- approximation iterations and Newton-Kantorovich iterations. The initial
@@ -100,23 +105,55 @@ module type dpsolve = {
                    -> ([m]t, bool, i64, i64, i64, t)
 }
 
--- | Parameterised module for creating generic solvers.
+-- | Module type specifying a linear equations solver and functionality for
+-- lifting a function to return also the partial derivative (i.e., the Jacobian
+-- matrix) relative to the argument.
 
-module mk_dpsolve (r:real) : dpsolve with t = r.t = {
+module type ols_jac = {
+  -- | The scalar type.
+  type t
 
-  type t = r.t
-  local module lu = mk_lu r
+  -- | Type of square matrices of size `n` (e.g., square or dense), with `t` as
+  -- scalar type.
+  type mat [n]
 
-  def blksz : i64 = 16  -- 1 or 16
+  -- | The identity matrix of size `n` x `n`.
+  val eye : (n:i64) -> mat [n]
 
-  def ols [n] (m:[n][n]t) (b:[n]t) : [n]t =
-    lu.ols blksz m b
+  -- | The zero matrix of size `n` x `n`.
+  val zero : (n:i64) -> mat [n]
 
-  def eye (n:i64) (m:i64) : [n][m]t =
-    tabulate_2d n m (\i j -> r.bool (i == j))
+  -- | Element-wise subtraction.
+  val sub [n] : mat [n] -> mat [n] -> mat [n]
 
-  def zero (n:i64) (m:i64) : [n][m]t =
-    replicate n (replicate m (r.i64 0))
+  -- | Solve systems of linear equations `Ax = b` with respect to `x`.
+  val ols [n] : mat [n] -> [n]t -> [n]t
+
+  -- | Augment function result with its partial derivative (Jacobinan) relative
+  -- to the function argument. We have `wrap f x = (f x, Df x)`, where `Df x` is
+  -- the Jacobian matrix for `f` at `x`.
+  val wrapj [n] : ([n]t->[n]t) -> [n]t -> ([n]t,mat [n])
+}
+
+-- | Parameterised module for creating generic (e.g., non-linear) solvers. The
+-- module is parameterised over an instance of `real`, such as the module `f64`
+-- and a compatible module for solving linear equations and computing partial
+-- derivatives for a function. One possible instance uses a dense linear
+-- equations solver on `f64` (e.g., `lu f64`) and Futhark's AD support.
+
+module mk_dpsolve (T:real)
+  	          (ols_jac: ols_jac with t = T.t) : dpsolve with t = T.t
+				 			    with mat [n] = ols_jac.mat [n] =
+{
+  type t = T.t
+  type mat [n] = ols_jac.mat [n]
+  local module lu = mk_lu T
+
+  def maxT (a:t) (b:t) : t =
+    if T.(a >= b) then a else b
+
+  def zeroT : t = T.i64 0
+  def maximumT [n] (a:[n]t) : t = reduce maxT zeroT a
 
   type param = {
     sa_max          : i64,  -- Maximum number of contraction steps
@@ -135,54 +172,54 @@ module mk_dpsolve (r:real) : dpsolve with t = r.t = {
   def default : param =
     {sa_max      = 20,
      sa_min      = 2,
-     sa_tol      = r.f64 1.0e-3,
+     sa_tol      = T.f64 1.0e-3,
      max_fxpiter = 35,
      pi_max      = 40,
-     pi_tol      = r.f64 1.0e-13,
-     tol_ratio   = r.f64 1.0e-03
+     pi_tol      = T.f64 1.0e-13,
+     tol_ratio   = T.f64 1.0e-03
     }
 
   def sa [m] (bellman : [m]t -> [m]t)
              (V0:[m]t)
              (ap:param)
              (bet:t) : ([m]t, bool, i64, t, t) =
-      loop (V0,converged,i,tol,_rtol) = (V0, false, 0, r.i64 0, r.i64 0)
+      loop (V0,converged,i,tol,_rtol) = (V0, false, 0, T.i64 0, T.i64 0)
       while !converged && i < ap.sa_max do
         let V = bellman V0
-	let tol' = reduce r.max (r.i64 0) (map2 (\a b -> r.(abs(a-b))) V V0)
-	let rtol' = if i == 1 then r.i64 1
-	 	    else r.(tol' / tol)
+	let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0)
+	let rtol' = if i == 1 then T.i64 1
+	 	    else T.(tol' / tol)
 	let converged =
              -- Rule 1
-             (i > ap.sa_min && (r.(abs(bet-rtol') < ap.tol_ratio)))
+             (i > ap.sa_min && (T.(abs(bet-rtol') < ap.tol_ratio)))
           || -- Rule 2
              --let adj = f64.(maximum V0 |> abs |> log10 |> ceil)
              --let ltol = ap.sa_tol * f64.(10 ** adj)
 	     let ltol = ap.sa_tol
-             in (i > ap.sa_min && r.(tol' < ltol))
+             in (i > ap.sa_min && T.(tol' < ltol))
 	in (V, converged, i+1, tol',rtol')
 
-  def nk [m] (bellman : [m]t -> ([m]t,[m][m]t))
+  def nk [m] (bellman : [m]t -> ([m]t,mat [m]))
              (V0:[m]t)
-             (ap:param) : ([m]t, [m][m]t, bool, i64, t) =
-    loop (V0,_dV0,converged,i,_tol) = (V0, zero m m, false, 0, r.i64 1)
+             (ap:param) : ([m]t, mat [m], bool, i64, t) =
+    loop (V0,_dV0,converged,i,_tol) = (V0, ols_jac.zero m, false, 0, T.i64 1)
       while !converged && i < ap.pi_max do
         let (V1, dV) = bellman V0
         --let V = map2 (-) V0 (la.matvecmul_row (la.inv dV) V1)
-	let F = map2 (map2 (r.-)) (eye m m) dV
+	let F = ols_jac.sub (ols_jac.eye m) dV
   	--let _hermitian =
-	--  map2 (map2 (r.==)) F (transpose F) |> map (reduce (&&) true) |> reduce (&&) true
-	let V = map2 (r.-) V0 (ols F (map2 (r.-) V0 V1))  -- NK-iteration
+	--  map2 (map2 (T.==)) F (transpose F) |> map (reduce (&&) true) |> reduce (&&) true
+	let V = map2 (T.-) V0 (ols_jac.ols F (map2 (T.-) V0 V1))  -- NK-iteration
 	-- do additional SA iteration for stability and accurate measure of error bound
 	let (V0, _) = bellman V
-	let tol' = r.maximum (map2 (\a b -> r.(abs(a-b))) V V0) -- tolerance
+	let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0) -- tolerance
 
 	-- adjusting the N-K tolerance to the magnitude of ev
-	let adj = r.(maximum V0 |> abs |> log10 |> ceil)
-	let ltol = r.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
+	let adj = T.(maximumT V0 |> abs |> log10 |> ceil)
+	let ltol = T.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
         -- ltol=ap.pi_tol  -- tolerance
 
-        let converged = r.(tol' < ltol) -- Convergence achieved
+        let converged = T.(tol' < ltol) -- Convergence achieved
         in (V0, dV, converged, i+1, tol')
 
   -- dpsolve.poly(f,v0,ap,bet): Solve for fixed point using a combination of
@@ -194,24 +231,38 @@ module mk_dpsolve (r:real) : dpsolve with t = r.t = {
   -- `V`, the Frechet derivative of the Bellman operator, and various count
   -- information including the obtained tolerance.
 
-  def poly [m] (bellman : [m]t -> ([m]t,[m][m]t))
+  def poly [m] (bellman : [m]t -> ([m]t,mat[m]))
                (V0:[m]t)
                (ap:param)
-               (bet:t) : ([m]t,[m][m]t,bool,i64,i64,i64,t) =
-    loop (V0,_dV,converged,i,j,k,_tol) = (V0, zero m m, false, 0, 0, 0, r.i64 1)
+               (bet:t) : ([m]t, mat [m], bool, i64, i64, i64, t) =
+    loop (V0,_dV,converged,i,j,k,_tol) = (V0, ols_jac.zero m, false, 0, 0, 0, T.i64 1)
       while !converged && k < ap.max_fxpiter do
         -- poly-algorithm loop (switching between sa and nk)
         let (V1,_,i',_,_) = sa ((.0) <-< bellman) V0 ap bet
 	let (V2, dV, c2, j', tol) = nk bellman V1 ap
         in (V2,dV,c2,i+i',j+j',k+1,tol)
 
-  def idd n i = tabulate n (\j -> if i==j then r.f32 1 else r.f32 0)
-
-  def wrapj [n][m] (f: [n]t->[m]t) (x:[n]t) : ([m]t,[m][n]t) =
-    (f x, #[sequential_outer] tabulate n (jvp f x <-< idd n) |> transpose)
-
   def polyad f x ap bet =
-    let (y,_,b,i,j,k,tol) = poly (wrapj f) x ap bet
+    let (y,_,b,i,j,k,tol) = poly (ols_jac.wrapj f) x ap bet
     in (y,b,i,j,k,tol)
+}
 
+-- | Parameterised module for creating generic (e.g., non-linear) solvers using
+-- dense Jacobians. The module is parameterised over an instance of `real`, such
+-- as the module `f64`.
+module mk_dpsolve_dense (T:real) : dpsolve with t = T.t with mat[n] = [n][n]T.t = {
+    local module lu = mk_lu T
+    local module ols_jac = {
+      type t = T.t
+      type mat [n] = [n][n]t
+      def blksz : i64 = 16 -- 16 or 1
+      def ols [n] (A:mat[n]) (b:[n]t) : [n]t = lu.ols blksz A b
+      def idd n i = tabulate n (\j -> T.bool(i==j))
+      def eye n = tabulate_2d n n (\i j -> T.bool (i==j))
+      def zero n = replicate n (replicate n (T.i64 0))
+      def sub a b = map2 (map2 (T.-)) a b
+      def wrapj [m] (f: [m]t->[m]t) (x:[m]t) : ([m]t,[m][m]t) =
+	(f x, #[sequential_outer] tabulate m (jvp f x <-< idd m) |> transpose)
+    }
+    open mk_dpsolve T ols_jac
 }
