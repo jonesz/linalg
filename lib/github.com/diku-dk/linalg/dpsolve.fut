@@ -13,7 +13,6 @@
 -- in https://elsman.com/pdf/dpsolve-2025-09-27.pdf.
 
 import "linalg"
-import "lu"
 
 local
 -- | Module type specifying generic solvers for Bellman equations. Notice that
@@ -147,13 +146,6 @@ module mk_dpsolve (T:real)
 {
   type t = T.t
   type mat [n] = ols_jac.mat [n]
-  local module lu = mk_lu T
-
-  def maxT (a:t) (b:t) : t =
-    if T.(a >= b) then a else b
-
-  def zeroT : t = T.i64 0
-  def maximumT [n] (a:[n]t) : t = reduce maxT zeroT a
 
   type param = {
     sa_max          : i64,  -- Maximum number of contraction steps
@@ -186,7 +178,7 @@ module mk_dpsolve (T:real)
       loop (V0,converged,i,tol,_rtol) = (V0, false, 0, T.i64 0, T.i64 0)
       while !converged && i < ap.sa_max do
         let V = bellman V0
-        let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0)
+        let tol' = T.maximum (map2 (\a b -> T.(abs(a-b))) V V0)
         let rtol' = if i == 1 then T.i64 1
                     else T.(tol' / tol)
         let converged =
@@ -212,10 +204,10 @@ module mk_dpsolve (T:real)
         let V = map2 (T.-) V0 (ols_jac.ols F (map2 (T.-) V0 V1))  -- NK-iteration
         -- do additional SA iteration for stability and accurate measure of error bound
         let (V0, _) = bellman V
-        let tol' = maximumT (map2 (\a b -> T.(abs(a-b))) V V0) -- tolerance
+        let tol' = T.maximum (map2 (\a b -> T.(abs(a-b))) V V0) -- tolerance
 
         -- adjusting the N-K tolerance to the magnitude of ev
-        let adj = T.(maximumT V0 |> abs |> log10 |> ceil)
+        let adj = T.(maximum V0 |> abs |> log10 |> ceil)
         let ltol = T.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
         -- ltol=ap.pi_tol  -- tolerance
 
@@ -246,6 +238,8 @@ module mk_dpsolve (T:real)
     let (y,_,b,i,j,k,tol) = poly (ols_jac.wrapj f) x ap bet
     in (y,b,i,j,k,tol)
 }
+
+import "lu"
 
 -- | Parameterised module for creating generic (e.g., non-linear) solvers using
 -- dense Jacobians. The module is parameterised over an instance of `real`, such
