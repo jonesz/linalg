@@ -87,7 +87,7 @@ module type dpsolve = {
   -- approximations (maximum of each dimension).
   val poly [m] : (f: [m]t -> ([m]t,mat[m])) -> (v:[m]t) -> (p:param)
                  -> (b:t) -> {res:[m]t, jac:mat[m], conv:bool, iter_sa:i64,
-			      iter_nk:i64, rtrips: i64, tol:t}
+                              iter_nk:i64, rtrips: i64, tol:t}
 
   -- | Find a fix-point for the function `f` using a combination of successive
   -- approximation iterations and Newton-Kantorovich iterations. The initial
@@ -101,7 +101,7 @@ module type dpsolve = {
   -- fix-point approximations (maximum of each dimension).
   val polyad [m] : (f:[m]t->[m]t) -> (v:[m]t) -> (p:param) -> (b:t)
                    -> {res:[m]t, conv:bool, iter_sa:i64, iter_nk: i64,
-		       rtrips:i64, tol:t}
+                       rtrips:i64, tol:t}
 }
 
 -- | Module type specifying a linear equations solver and functionality for
@@ -229,7 +229,7 @@ module mk_dpsolve (T:real)
                (V0:[m]t)
                (ap:param)
                (bet:t) : {res:[m]t, jac:mat [m], conv:bool, iter_sa:i64,
-			  iter_nk:i64, rtrips:i64, tol:t} =
+                          iter_nk:i64, rtrips:i64, tol:t} =
     loop {res=V0,jac=_dV,conv=converged,iter_sa=i,iter_nk=j,rtrips=k,tol=_tol} =
       {res=V0, jac=ols_jac.zero m, conv=false, iter_sa=0, iter_nk=0, rtrips=0, tol=T.i64 1}
       while !converged && k < ap.max_fxpiter do
