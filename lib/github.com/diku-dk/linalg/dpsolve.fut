@@ -175,14 +175,14 @@ module mk_dpsolve (T:real)
              (V0:[m]t)
              (ap:param)
              (bet:t) : {res:[m]t, conv:bool, iter:i64, tol:t, rtol:t} =
-    loop {res=V0,conv=converged,iter=i,tol=tol,rtol=_rtol} =
+    loop {res=V0,conv,iter=i,tol,rtol=_rtol} =
       {res=V0, conv=false, iter=0, tol=T.i64 0, rtol=T.i64 0}
-      while !converged && i < ap.sa_max do
+      while !conv && i < ap.sa_max do
         let V = bellman V0
         let tol' = T.maximum (map2 (\a b -> T.(abs(a-b))) V V0)
         let rtol' = if i == 1 then T.i64 1
                     else T.(tol' / tol)
-        let converged =
+        let conv =
              -- Rule 1
              (i > ap.sa_min && (T.(abs(bet-rtol') < ap.tol_ratio)))
           || -- Rule 2
@@ -190,14 +190,14 @@ module mk_dpsolve (T:real)
              --let ltol = ap.sa_tol * f64.(10 ** adj)
              let ltol = ap.sa_tol
              in (i > ap.sa_min && T.(tol' < ltol))
-        in {res=V, conv=converged, iter=i+1, tol=tol',rtol=rtol'}
+        in {res=V, conv, iter=i+1, tol=tol',rtol=rtol'}
 
   def nk [m] (bellman : [m]t -> ([m]t,mat [m]))
              (V0:[m]t)
              (ap:param) : {res:[m]t, jac:mat[m], conv:bool, iter:i64, tol:t} =
-    loop {res=V0,jac=_dV0,conv=converged,iter=i,tol=_tol} =
+    loop {res=V0,jac=_dV0,conv,iter=i,tol=_tol} =
       {res=V0, jac=ols_jac.zero m, conv=false, iter=0, tol=T.i64 1}
-      while !converged && i < ap.pi_max do
+      while !conv && i < ap.pi_max do
         let (V1, dV) = bellman V0
         --let V = map2 (-) V0 (la.matvecmul_row (la.inv dV) V1)
         let F = ols_jac.sub (ols_jac.eye m) dV
@@ -213,8 +213,8 @@ module mk_dpsolve (T:real)
         let ltol = T.(ap.pi_tol * (i64 10 ** adj)) -- Adjust final tolerance
         -- ltol=ap.pi_tol  -- tolerance
 
-        let converged = T.(tol' < ltol) -- Convergence achieved
-        in {res=V0, jac=dV, conv=converged, iter=i+1, tol=tol'}
+        let conv = T.(tol' < ltol) -- Convergence achieved
+        in {res=V0, jac=dV, conv, iter=i+1, tol=tol'}
 
   -- dpsolve.poly(f,v0,ap,bet): Solve for fixed point using a combination of
   -- Successive Approximations (SA) and Newton-Kantorovich (NK) iterations.  The
@@ -230,13 +230,13 @@ module mk_dpsolve (T:real)
                (ap:param)
                (bet:t) : {res:[m]t, jac:mat [m], conv:bool, iter_sa:i64,
                           iter_nk:i64, rtrips:i64, tol:t} =
-    loop {res=V0,jac=_dV,conv=converged,iter_sa=i,iter_nk=j,rtrips=k,tol=_tol} =
+    loop {res=V0,jac=_dV,conv,iter_sa=i,iter_nk=j,rtrips=k,tol=_tol} =
       {res=V0, jac=ols_jac.zero m, conv=false, iter_sa=0, iter_nk=0, rtrips=0, tol=T.i64 1}
-      while !converged && k < ap.max_fxpiter do
+      while !conv && k < ap.max_fxpiter do
         -- poly-algorithm loop (switching between sa and nk)
         let {res=V1,conv=_,iter=i',tol=_,rtol=_} = sa ((.0) <-< bellman) V0 ap bet
         let {res=V2, jac=dV, conv=c2, iter=j', tol} = nk bellman V1 ap
-        in {res=V2,jac=dV,conv=c2,iter_sa=i+i',iter_nk=j+j',rtrips=k+1,tol=tol}
+        in {res=V2,jac=dV,conv=c2,iter_sa=i+i',iter_nk=j+j',rtrips=k+1,tol}
 
   def polyad f x ap bet =
     let {res,jac=_,conv,iter_sa,iter_nk,rtrips,tol} = poly (ols_jac.wrapj f) x ap bet
